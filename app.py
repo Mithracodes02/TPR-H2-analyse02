@@ -56,9 +56,14 @@ grid_alpha = st.sidebar.slider("Grid Transparency:", 0.1, 1.0, 0.5)
 spine_color = st.sidebar.color_picker("Graph Outline / Spine Color:", value="#000000")
 spine_width = st.sidebar.slider("Graph Outline Thickness:", 0.5, 3.0, 1.2)
 
-# Legend Controls
+# Legend Customization Controls
+st.sidebar.header("5. Legend Settings")
 show_legend = st.sidebar.checkbox("Show Legend", value=True)
+legend_title = st.sidebar.text_input("Legend Title (Optional):", "")
 legend_loc = st.sidebar.selectbox("Legend Location:", ["best", "upper right", "upper left", "lower right", "lower left", "outside"])
+legend_fontsize = st.sidebar.slider("Legend Font Size:", 6, 16, 10)
+legend_ncols = st.sidebar.number_input("Legend Columns:", min_value=1, max_value=5, value=1)
+legend_frame = st.sidebar.checkbox("Draw Legend Box Frame", value=True)
 
 # Apply Global Font Styling
 plt.rcParams['font.sans-serif'] = font_family
@@ -145,26 +150,29 @@ if uploaded_files:
         st.success(f"Successfully loaded {len(datasets)} dataset(s).")
         
         # ---------------------------------------------------------
-        # Sample Composition & Dispersion Parameters
+        # Sample Composition, Legend Labels & Dispersion Parameters
         # ---------------------------------------------------------
-        st.subheader("Sample Parameters, Composition & Metal Dispersion")
+        st.subheader("Sample Parameters, Custom Legend Labels & Metal Dispersion")
         sample_params = {}
         
         for idx, name in enumerate(datasets.keys()):
-            with st.expander(f"Sample Parameters: {name}", expanded=True):
-                c1, c2, c3 = st.columns(3)
+            with st.expander(f"Sample Settings: {name}", expanded=True):
+                c1, c2, c3, c4 = st.columns([2, 1.5, 1.5, 1])
                 with c1:
-                    mass = st.number_input("Catalyst Mass (g):", min_value=0.0001, value=0.0500, format="%.4f", key=f"mass_{name}")
+                    custom_legend_name = st.text_input("Custom Legend Label:", value=name.rsplit('.', 1)[0], key=f"leg_{name}")
                     components = st.text_input("Components Description:", value="Cu/ZnO/Al2O3", key=f"comp_{name}")
                 with c2:
-                    metal_wt_pct = st.number_input("Active Metal Weight % (wt%):", min_value=0.0, max_value=100.0, value=10.0, step=0.5, key=f"wt_{name}")
-                    metal_mw = st.number_input("Metal Atomic Weight (g/mol):", min_value=1.0, value=63.55, step=0.1, key=f"mw_{name}", help="Cu = 63.55, Ni = 58.69, Pt = 195.08, Fe = 55.85")
+                    mass = st.number_input("Catalyst Mass (g):", min_value=0.0001, value=0.0500, format="%.4f", key=f"mass_{name}")
+                    metal_wt_pct = st.number_input("Metal (wt%):", min_value=0.0, max_value=100.0, value=10.0, step=0.5, key=f"wt_{name}")
                 with c3:
-                    stoich_factor = st.number_input("Reduction Stoichiometry (H₂/Metal):", min_value=0.1, value=1.0, step=0.1, key=f"st_{name}", help="CuO -> Cu requires 1.0 H2/Cu")
+                    metal_mw = st.number_input("Metal MW (g/mol):", min_value=1.0, value=63.55, step=0.1, key=f"mw_{name}")
+                    stoich_factor = st.number_input("Stoichiometry (H₂/Metal):", min_value=0.1, value=1.0, step=0.1, key=f"st_{name}")
+                with c4:
                     default_colors = ["#d9534f", "#0275d8", "#5cb85c", "#f0ad4e", "#6f42c1", "#17a2b8"]
                     line_color = st.color_picker("Plot Color:", value=default_colors[idx % len(default_colors)], key=f"col_{name}")
                 
                 sample_params[name] = {
+                    "legend_label": custom_legend_name,
                     "mass": mass,
                     "components": components,
                     "metal_wt_pct": metal_wt_pct,
@@ -228,9 +236,10 @@ if uploaded_files:
             t_max_val = x_vals[max_idx] if len(x_vals) > 0 else 0
             y_max_val = y_plot[max_idx] if len(y_plot) > 0 else 0
 
-            # Render Line & Area
+            # Render Line & Area with Custom Legend Label
             color = p["color"]
-            ax.plot(x_vals, y_plot, label=f"{name} (T_max = {t_max_val:.1f}°C)", color=color, linewidth=2)
+            label_str = p["legend_label"]
+            ax.plot(x_vals, y_plot, label=label_str, color=color, linewidth=2)
             
             if fill_peaks:
                 ax.fill_between(x_vals, offset_val, y_plot, color=color, alpha=fill_alpha)
@@ -251,6 +260,7 @@ if uploaded_files:
 
             report_data.append({
                 "Filename": name,
+                "Legend Label": label_str,
                 "Mass (g)": mass,
                 "Components": p["components"],
                 "Metal (wt%)": p["metal_wt_pct"],
@@ -287,11 +297,26 @@ if uploaded_files:
         if show_grid:
             ax.grid(True, linestyle=grid_style, alpha=grid_alpha)
             
+        # Legend Customization Engine
         if show_legend:
+            title_arg = legend_title if legend_title.strip() != "" else None
             if legend_loc == "outside":
-                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=font_size_ticks)
+                ax.legend(
+                    bbox_to_anchor=(1.05, 1), 
+                    loc='upper left', 
+                    fontsize=legend_fontsize, 
+                    title=title_arg, 
+                    ncol=legend_ncols, 
+                    frameon=legend_frame
+                )
             else:
-                ax.legend(loc=legend_loc, fontsize=font_size_ticks)
+                ax.legend(
+                    loc=legend_loc, 
+                    fontsize=legend_fontsize, 
+                    title=title_arg, 
+                    ncol=legend_ncols, 
+                    frameon=legend_frame
+                )
 
         st.pyplot(fig)
 
@@ -335,7 +360,7 @@ if uploaded_files:
         report_text += f"Integration Range: {x_min:.1f} °C to {x_max:.1f} °C\n\n"
         
         for r in report_data:
-            report_text += f"--- Sample: {r['Filename']} ---\n"
+            report_text += f"--- Sample: {r['Filename']} ({r['Legend Label']}) ---\n"
             report_text += f"  - Mass of Catalyst: {r['Mass (g)']} g\n"
             report_text += f"  - Active Metal Content: {r['Metal (wt%)']} wt%\n"
             report_text += f"  - Components: {r['Components']}\n"

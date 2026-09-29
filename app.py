@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="TPR-H2 Analysis", layout="wide")
 
-st.title("TPR-H2 Data Analysis")
+st.title("TPR-H₂ Data Analysis")
 st.write("Upload your data file to visualize temperature-programmed reduction profiles.")
 
 uploaded_file = st.file_uploader("Choose a CSV or Excel file", type=["csv", "xlsx"])

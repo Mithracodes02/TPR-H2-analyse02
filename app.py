@@ -24,7 +24,7 @@ custom_ylabel = st.sidebar.text_input("Y-Axis Label:", "TCD Signal (a.u.)")
 show_legend = st.sidebar.checkbox("Show Legend", value=True)
 show_grid = st.sidebar.checkbox("Show Grid Lines", value=True)
 
-# Main File Upload (Multiple Files)
+# Main File Upload
 st.subheader("Data Upload")
 uploaded_files = st.file_uploader(
     "Upload AutoChem Excel/CSV files (Multiple allowed for comparison):", 
@@ -33,8 +33,12 @@ uploaded_files = st.file_uploader(
 )
 
 def parse_autochem_file(file):
-    """Parses raw AutoChem files by scanning for the TCD Signal vs Temperature table."""
+    """
+    Parses raw AutoChem files by scanning for the TCD Signal vs Temperature table
+    and standardizes column names to 'Temperature' and 'TCD Signal'.
+    """
     try:
+        # Load raw file as string grid
         if file.name.endswith('.csv'):
             raw_df = pd.read_csv(file, header=None, dtype=str)
         else:
@@ -64,20 +68,47 @@ def parse_autochem_file(file):
                 if not clean_df.empty:
                     return clean_df
 
+        # Fallback reading for standard files
         file.seek(0)
         if file.name.endswith('.csv'):
-            return pd.read_csv(file)
+            df = pd.read_csv(file)
         else:
-            return pd.read_excel(file)
+            df = pd.read_excel(file)
+
+        # Standardize column naming in fallback mode
+        temp_col = None
+        tcd_col = None
+
+        for col in df.columns:
+            col_str = str(col).lower()
+            if "temp" in col_str and temp_col is None:
+                temp_col = col
+            elif ("tcd" in col_str or "signal" in col_str) and tcd_col is None:
+                tcd_col = col
+
+        # If no matched names, assign by position (Col 0 = Temp, Col 1 = TCD)
+        if temp_col is None:
+            temp_col = df.columns[0]
+        if tcd_col is None:
+            tcd_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+
+        df_out = pd.DataFrame({
+            "Temperature": pd.to_numeric(df[temp_col], errors='coerce'),
+            "TCD Signal": pd.to_numeric(df[tcd_col], errors='coerce')
+        }).dropna().reset_index(drop=True)
+
+        return df_out
+
     except Exception as e:
         st.error(f"Error parsing file {file.name}: {e}")
         return None
+
 
 if uploaded_files:
     datasets = {}
     for f in uploaded_files:
         parsed = parse_autochem_file(f)
-        if parsed is not None:
+        if parsed is not None and not parsed.empty:
             datasets[f.name] = parsed
 
     if datasets:
@@ -87,15 +118,16 @@ if uploaded_files:
         st.subheader("Sample Parameters & Mass Details")
         sample_params = {}
         
-        for name in datasets.keys():
+        for idx, name in enumerate(datasets.keys()):
             with st.expander(f"Sample Settings: {name}", expanded=True):
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    mass = st.number_input(f"Catalyst Mass (g) [{name}]:", min_value=0.0001, value=0.0500, format="%.4f", key=f"mass_{name}")
+                    mass = st.number_input(f"Catalyst Mass (g):", min_value=0.0001, value=0.0500, format="%.4f", key=f"mass_{name}")
                 with col2:
                     components = st.text_input(f"Components (e.g., CuO: 10%, ZnO: 15%):", value="CuO: 10%", key=f"comp_{name}")
                 with col3:
-                    line_color = st.color_picker(f"Plot Color [{name}]:", value="#d9534f" if len(sample_params)==0 else "#0275d8", key=f"col_{name}")
+                    default_colors = ["#d9534f", "#0275d8", "#5cb85c", "#f0ad4e", "#6f42c1"]
+                    line_color = st.color_picker(f"Plot Color:", value=default_colors[idx % len(default_colors)], key=f"col_{name}")
                 
                 sample_params[name] = {
                     "mass": mass,
@@ -103,24 +135,32 @@ if uploaded_files:
                     "color": line_color
                 }
 
-        # Global Axis Range Setup
+        # Safe Global Axis Range Setup
         all_min_temp = min([df["Temperature"].min() for df in datasets.values()])
         all_max_temp = max([df["Temperature"].max() for df in datasets.values()])
         
         st.subheader("Axis Limits & Integration Range")
-        x_min, x_max = st.slider("Temperature Range (°C):", float(all_min_temp), float(all_max_temp), (float(all_min_temp), float(all_max_temp)))
+        x_min, x_max = st.slider(
+            "Temperature Range (°C):", 
+            float(all_min_temp), 
+            float(all_max_temp), 
+            (float(all_min_temp), float(all_max_temp))
+        )
 
         # Process calculations and plotting
         fig, ax = plt.subplots(figsize=(10, 5))
         report_data = []
 
-        for idx, (name, df) in enumerate(datasets.items()):
+        for name, df in datasets.items():
             # Filter Range
             df_sub = df[(df["Temperature"] >= x_min) & (df["Temperature"] <= x_max)].sort_values(by="Temperature")
             
             x_vals = df_sub["Temperature"].values
             y_raw = df_sub["TCD Signal"].values
             
+            if len(x_vals) < 2:
+                continue
+
             # Baseline subtraction
             baseline = np.linspace(y_raw[0], y_raw[-1], len(y_raw))
             y_corr = np.maximum(y_raw - baseline, 0)

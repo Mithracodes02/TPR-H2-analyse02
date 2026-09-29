@@ -25,6 +25,11 @@ y_offset = 0.0
 if plot_mode == "Stacked / Offset":
     y_offset = st.sidebar.number_input("Vertical Y-Offset between curves:", min_value=0.0, value=0.05, step=0.01, format="%.3f")
 
+# Peak Filling & Peak Annotations
+fill_peaks = st.sidebar.checkbox("Fill / Shade Peak Area", value=True)
+fill_alpha = st.sidebar.slider("Fill Transparency (Alpha):", 0.05, 1.0, 0.15) if fill_peaks else 0.0
+show_peak_labels = st.sidebar.checkbox("Annotate Peak T_max Values on Graph", value=True)
+
 st.sidebar.header("3. Publication Typography & Styling")
 font_family = st.sidebar.selectbox("Font Style:", ["DejaVu Sans", "Arial", "Times New Roman", "Courier New", "Helvetica", "Calibri"])
 font_size_labels = st.sidebar.slider("Axis Label Font Size:", 8, 20, 12)
@@ -37,14 +42,21 @@ custom_title = st.sidebar.text_input("Plot Title:", "Temperature-Programmed Redu
 custom_xlabel = st.sidebar.text_input("X-Axis Label:", "Temperature (°C)")
 custom_ylabel = st.sidebar.text_input("Y-Axis Label:", "TCD Signal (a.u.)")
 
-st.sidebar.header("4. Grid & Spine Aesthetics")
+st.sidebar.header("4. Ticks, Grid & Spine Aesthetics")
+# Tick Controls
+show_x_ticks = st.sidebar.checkbox("Show X-Axis Ticks & Labels", value=True)
+show_y_ticks = st.sidebar.checkbox("Show Y-Axis Ticks & Labels", value=True)
+
+# Grid Controls
 show_grid = st.sidebar.checkbox("Show Grid Lines", value=True)
 grid_style = st.sidebar.selectbox("Grid Line Style:", ["--", "-", ":", "-."])
 grid_alpha = st.sidebar.slider("Grid Transparency:", 0.1, 1.0, 0.5)
 
+# Spine / Outline Controls
 spine_color = st.sidebar.color_picker("Graph Outline / Spine Color:", value="#000000")
 spine_width = st.sidebar.slider("Graph Outline Thickness:", 0.5, 3.0, 1.2)
 
+# Legend Controls
 show_legend = st.sidebar.checkbox("Show Legend", value=True)
 legend_loc = st.sidebar.selectbox("Legend Location:", ["best", "upper right", "upper left", "lower right", "lower left", "outside"])
 
@@ -202,24 +214,40 @@ if uploaded_files:
             mass = p["mass"]
             
             total_mmol_h2 = integrated_area / calib_factor if calib_factor > 0 else 0
-            h2_per_g = total_mmol_h2 / mass if mass > 0 else 0 # mmol/g_cat
+            h2_per_g = total_mmol_h2 / mass if mass > 0 else 0
             
-            # Metal Stoichiometry, Reductibility & Dispersion Calculations
+            # Metal Stoichiometry & Dispersion Calculations
             mmol_metal_per_g = (p["metal_wt_pct"] / 100.0) * (1000.0 / p["metal_mw"])
             h2_to_metal_ratio = h2_per_g / mmol_metal_per_g if mmol_metal_per_g > 0 else 0
             
             theoretical_h2 = mmol_metal_per_g * p["stoich_factor"]
             reductibility = (h2_per_g / theoretical_h2 * 100.0) if theoretical_h2 > 0 else 0
-            
-            # Metal Dispersion (%): Ratio of experimental surface-consumed H2 to total metal
             dispersion = (h2_per_g / (mmol_metal_per_g * p["stoich_factor"])) * 100.0 if mmol_metal_per_g > 0 else 0
 
-            t_max_val = x_vals[np.argmax(y_corr)] if len(y_corr) > 0 else 0
+            max_idx = np.argmax(y_corr) if len(y_corr) > 0 else 0
+            t_max_val = x_vals[max_idx] if len(x_vals) > 0 else 0
+            y_max_val = y_plot[max_idx] if len(y_plot) > 0 else 0
 
             # Render Line & Area
             color = p["color"]
             ax.plot(x_vals, y_plot, label=f"{name} (T_max = {t_max_val:.1f}°C)", color=color, linewidth=2)
-            ax.fill_between(x_vals, offset_val, y_plot, color=color, alpha=0.15)
+            
+            if fill_peaks:
+                ax.fill_between(x_vals, offset_val, y_plot, color=color, alpha=fill_alpha)
+
+            # Annotate Peak Maximum directly on plot
+            if show_peak_labels and len(x_vals) > 0:
+                ax.annotate(
+                    f"{t_max_val:.1f}°C",
+                    xy=(t_max_val, y_max_val),
+                    xytext=(0, 6),
+                    textcoords="offset points",
+                    ha='center',
+                    va='bottom',
+                    fontsize=font_size_ticks,
+                    fontweight='bold',
+                    color=color
+                )
 
             report_data.append({
                 "Filename": name,
@@ -239,7 +267,17 @@ if uploaded_files:
         ax.set_xlabel(custom_xlabel, fontsize=font_size_labels, fontweight=label_weight)
         ax.set_ylabel(custom_ylabel, fontsize=font_size_labels, fontweight=label_weight)
         ax.set_xlim(x_min, x_max)
-        ax.tick_params(axis='both', labelsize=font_size_ticks)
+
+        # Axis Ticks and Labels Visibility
+        if show_x_ticks:
+            ax.tick_params(axis='x', which='both', bottom=True, labelbottom=True, labelsize=font_size_ticks)
+        else:
+            ax.tick_params(axis='x', which='both', bottom=False, labelbottom=False)
+
+        if show_y_ticks:
+            ax.tick_params(axis='y', which='both', left=True, labelleft=True, labelsize=font_size_ticks)
+        else:
+            ax.tick_params(axis='y', which='both', left=False, labelleft=False)
 
         # Spine Styling
         for spine in ax.spines.values():
@@ -263,25 +301,21 @@ if uploaded_files:
         st.subheader("Publication Figure Export")
         c_exp1, c_exp2, c_exp3, c_exp4 = st.columns(4)
 
-        # High-Res PNG
         buf_png = io.BytesIO()
         fig.savefig(buf_png, format="png", dpi=600, bbox_inches="tight")
         buf_png.seek(0)
         c_exp1.download_button("Download PNG (600 DPI)", buf_png, "tpr_figure.png", "image/png")
 
-        # Vector SVG
         buf_svg = io.BytesIO()
         fig.savefig(buf_svg, format="svg", bbox_inches="tight")
         buf_svg.seek(0)
         c_exp2.download_button("Download Vector SVG", buf_svg, "tpr_figure.svg", "image/svg+xml")
 
-        # Vector PDF
         buf_pdf = io.BytesIO()
         fig.savefig(buf_pdf, format="pdf", bbox_inches="tight")
         buf_pdf.seek(0)
         c_exp3.download_button("Download Publication PDF", buf_pdf, "tpr_figure.pdf", "application/pdf")
 
-        # Vector EPS
         buf_eps = io.BytesIO()
         fig.savefig(buf_eps, format="eps", bbox_inches="tight")
         buf_eps.seek(0)
@@ -310,13 +344,6 @@ if uploaded_files:
             report_text += f"  - H2 / Metal Molar Ratio: {r['H2 / Metal Ratio']}\n"
             report_text += f"  - Degree of Reductibility: {r['Reductibility (%)']} %\n"
             report_text += f"  - Calculated Metal Dispersion: {r['Metal Dispersion (%)']} %\n\n"
-
-        if len(report_data) > 1:
-            report_text += "--- COMPARATIVE SUMMARY ---\n"
-            sorted_by_disp = sorted(report_data, key=lambda x: x['Metal Dispersion (%)'], reverse=True)
-            report_text += f"Highest Dispersion: {sorted_by_disp[0]['Filename']} ({sorted_by_disp[0]['Metal Dispersion (%)']} %)\n"
-            sorted_by_reducibility = sorted(report_data, key=lambda x: x['H2 Consumption (mmol/g)'], reverse=True)
-            report_text += f"Highest H2 Consumption: {sorted_by_reducibility[0]['Filename']} ({sorted_by_reducibility[0]['H2 Consumption (mmol/g)']} mmol/g)\n"
 
         st.download_button(
             label="Download Full Analysis & Dispersion Report (TXT)",
